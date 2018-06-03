@@ -3,6 +3,9 @@
 Publish helper for airbnb/knowledge-repo
 
 ```
+usage: publisher [-h] --notebook_path NOTEBOOK_PATH --report_path REPORT_PATH
+                 --repo REPO
+
 Publish a Jupyter notebook to Knowledge Repo and link to its git remote and
 commit ID.
 
@@ -16,6 +19,7 @@ required arguments:
                         The path to which to publish the report.
   --repo REPO           The repo or database to pass to the `$ knowledge_repo`
                         call.
+
 ```
 
 Ties publishing to version control.
