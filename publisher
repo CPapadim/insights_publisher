@@ -171,10 +171,5 @@ def main():
     # Cleanup
     shutil.rmtree(temp_dir, ignore_errors=True)
 
-
-
-
-# Publish notebook
-# knowledge_repo --repo test_repo add customer_segments-data_science-project/cells_show_test.ipynb -p project/cellsShow --update
 if __name__ == '__main__':
     main()
