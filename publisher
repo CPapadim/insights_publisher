@@ -60,8 +60,6 @@ def add_repo_info(temp_notebook, nb_path_in_repo, repo_url_base, repo_name, comm
     notebook_name = nb_path_in_repo.split("/")[-1]
     notebook_url = repo_url_base + "/blob/" + commit_id + nb_path_in_repo
 
-    #https://github.com/HarryPatientPop/knowledge-repo-renamed  /blob/master/  knowledge_repo/templates/knowledge_template.md
-
     nb = nbf.read(temp_notebook, as_version=4)
 
     text = """### Git Metadata:\
