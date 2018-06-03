@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+
+import argparse
+import sys, os, shutil
+import random, string
+import subprocess
+import logging
+import githelpers as gh
+
+import nbformat as nbf
+
+def is_tool(name):
+    try:
+        devnull = open(os.devnull)
+        subprocess.Popen([name], stdout=devnull, stderr=devnull).communicate()
+    except OSError as e:
+        if e.errno == os.errno.ENOENT:
+            return False
+    return True
+
+def validate_repo(repo_root):
+    
+    if not is_tool("git"):
+        logging.error("git not detected.  Please install git and add it to the PATH to proceed.")
+        sys.exit(1)
+
+    if not gh.is_git_repo(repo_root):
+        logging.error("Only files within git repositories may be published.")
+        sys.exit(1)
+
+    if not gh.is_commited(repo_root):
+        logging.warning("Repo contains uncommited changes.  Please commit and push to remote.")
+        logging.warning("Published report will reflect the state of remote 'origin/master'.")
+        logging.warning("Merge any local changes you wish to publish to remote 'origin/master' before publishing.")
+
+    try:
+        if not gh.is_master(repo_root):
+            logging.warning("'master' branch is currently not checked out.")
+            logging.warning("Published report will reflect the state of remote 'origin/master'.")
+            logging.warning("If the current brancn contains changes you wish to publish, please merge them to 'origin/master' before publishing.")
+    except subprocess.CalledProcessError as e:
+        logging.warning("Failed to determine if current branch is the master branch.  \n\n" + str(e.output))
+        logging.warning("Published report will reflect the state of remote 'origin/master'. ")
+
+    try:
+        if not gh.is_synced(repo_root):
+            logging.warning("Commit mismatch between local and remote 'master' branch.")
+            logging.warning("Published report will reflect the state of remote 'origin/master'.")
+            logging.warning("Merge any local changes you wish to publish to remote 'origin/master' befor publishing.")
+    except subprocess.CalledProcessError as e:
+        logging.warning("Failed to detect if local repo is synced with remote.\n\n" + str(e.output))
+        logging.warning("Published report will reflect the state of remote 'origin/master'.")
+
+
+def add_repo_info(temp_notebook, nb_path_in_repo, repo_url_base, repo_name, commit_id):
+    
+    commit_url = repo_url_base + "/tree/" + commit_id
+
+
+    notebook_name = nb_path_in_repo.split("/")[-1]
+    notebook_url = repo_url_base + "/blob/" + commit_id + nb_path_in_repo
+
+    #https://github.com/HarryPatientPop/knowledge-repo-renamed  /blob/master/  knowledge_repo/templates/knowledge_template.md
+
+    nb = nbf.read(temp_notebook, as_version=4)
+
+    text = """### Git Metadata:\
+    <style>\
+    .repo_info, .repo_info a {\
+        background-color: #00a699;\
+        color: #fff;\
+        cursor: pointer;\
+        display: inline-block;\
+        padding:5px;\
+        text-align:center;\
+        border-radius:3px;\
+    }\
+    .repo_info {\
+        margin-right:10px;\
+    }\
+    .code-output:last-of-type {\
+        text-align:center;\
+        border-left: solid #6BD2CA 10px;\
+        border-right: solid #6BD2CA 10px;\
+    }\
+    </style>\
+
+    <div class='repo_info'>\
+        <a href = '""" + repo_url_base + "'>" + "Repo:  " + repo_name + "</a>" + """\
+    </div>\
+    <div class='repo_info'>\
+        <a href = '""" + commit_url + "'>" + "Commit ID: " + commit_id + "</a>" + """\
+    </div>\
+    <div class='repo_info'>\
+        <a href = '""" + notebook_url + "'>" + "File: " + notebook_name + "</a>" + """\
+    </div>\
+    """
+
+    metadata = {"slideshow": {"slide_type": "slide"}}
+
+    nb['cells'].append(nbf.v4.new_markdown_cell(text, metadata=metadata))
+
+    nbf.write(nb, temp_notebook)
+
+
+def main():
+
+    parser = argparse.ArgumentParser(description='Publish a Jupyter notebook to Knowledge Repo and link to its git remote and commit ID.')
+
+    # --- Required input arguments --- #
+    requiredArgs = parser.add_argument_group('required arguments')
+    requiredArgs.add_argument('--notebook_path', type=str, required=True, metavar="NOTEBOOK_PATH",
+                              help="The path to the Jupyter notebook to publish.")
+
+    requiredArgs.add_argument('--report_path', type=str, required=True, metavar="REPORT_PATH",
+                              help="The path to which to publish the report.")
+
+    requiredArgs.add_argument('--repo', type=str, required=True, metavar="REPO",
+                              help="The repo or database to pass to the `$ knowledge_repo` call.")
+    
+    # if no argument is passed, show help :
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
+
+    args = parser.parse_args()
+
+
+    if not os.path.isfile(args.notebook_path):
+        raise ValueError("Notebook path does not exist.")
+        sys.exit(1) 
+
+    # Get the notebook file and directory names, and other paths
+    file_dir = os.path.dirname(os.path.normpath(args.notebook_path))
+    file_name = os.path.basename(os.path.normpath(args.notebook_path))
+    nb_path_in_repo = gh.get_path_in_repo(file_dir) + "/" + file_name
+
+    repo_root = gh.get_repo_root(file_dir)
+    repo_name = repo_root.split("/")[-1]
+    script_dir = os.path.dirname(sys.argv[0])
+    rand_dir = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(20))
+    temp_dir = script_dir + "/temp_dir/" + rand_dir
+    temp_notebook = temp_dir + "/" + repo_name + nb_path_in_repo
+
+
+    # Create temporary directory
+    if not os.path.exists(temp_dir):
+        try:
+            os.makedirs(temp_dir)
+        except OSError as exc: # Guard against race condition
+            if exc.errno != os.errno.EEXIST:
+                raise
+
+
+    # Make sure the repo is ready for publication    
+    validate_repo(repo_root)
+
+    # clone the repo
+    repo_url = gh.get_repo_url(repo_root)
+    gh.git_clone(repo_url, temp_dir)
+
+    # Add git repo info (link to repo, commit id, and notebook link in commit)
+    repo_url_base = '.'.join(repo_url.split(".")[:-1])
+    commit_id = gh.get_commit_id(repo_root, "origin/master")
+    add_repo_info(temp_notebook, nb_path_in_repo, repo_url_base, repo_name, commit_id)
+    
+    # Publish the notebook
+    kr_command = "knowledge_repo --repo " + args.repo + " add " + temp_notebook + " -p " + args.report_path + " --update"
+    subprocess.call(kr_command.split())
+    
+    # Cleanup
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+
+
+# Publish notebook
+# knowledge_repo --repo test_repo add customer_segments-data_science-project/cells_show_test.ipynb -p project/cellsShow --update
+if __name__ == '__main__':
+    main()
