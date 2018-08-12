@@ -3,22 +3,30 @@
 Publish helper for airbnb/knowledge-repo
 
 ```
-usage: publisher [-h] --notebook_path NOTEBOOK_PATH --report_path REPORT_PATH
-                 --repo REPO
+usage: publisher [-h] [--notebook_path NOTEBOOK_PATH]
+                 [--report_path REPORT_PATH] [--repo REPO]
+                 {preview,add,publish,index} ...
 
 Publish a Jupyter notebook to Knowledge Repo and link to its git remote and
 commit ID.
 
+positional arguments:
+  {preview,add,publish,index}
+                        sub-commands
+    preview             Preview post.
+    add                 Submit post for review
+    publish             Publish post
+    index               Refresh the index to make new posts discoverable
+
 optional arguments:
   -h, --help            show this help message and exit
 
-required arguments:
+general arguments:
   --notebook_path NOTEBOOK_PATH
                         The path to the Jupyter notebook to publish.
   --report_path REPORT_PATH
                         The path to which to publish the report.
-  --repo REPO           The repo or database to pass to the `$ knowledge_repo`
-                        call.
+  --repo REPO           The knowledge repository uri.
 
 ```
 
@@ -36,7 +44,35 @@ Only supports .ipynb formats!
 ## Usage:
 
 ```
-$ ./publisher --notebook_path /path/to/notebook.ipynb --report_path path/to/project/and/report --repo path/to/knowledge_repo/storage
+Add a post:  
+
+$ publisher --repo "uri/or/path/to/repo" --notebook_path /path/to/notebook.ipynb --report_path path/to/project/and/report.kp add
 ```
+```
+Update a post:
+
+$ publisher --repo "uri/or/path/to/repo" --notebook_path /path/to/notebook.ipynb --report_path path/to/project/and/report.kp add --update
+```
+```
+Preview: 
+
+$ publisher --repo "uri/or/path/to/repo" --report_path path/to/project/and/report.kp preview --host www.repohost.com --port 443 --protocol https
+```
+
+```
+Publish: 
+
+$ publisher --repo "uri/or/path/to/repo" --report_path path/to/project/and/report.kp publish
+```
+
+
+Publisher also allows manual indexing without re-indexing already indexed posts.  This should work with stock Knowledge Repo, but is designed for a custom version that that also has functionality to skip setting up indexing timers, for one-time indexing after post publication. 
+
+```
+Manually Update Index:
+
+$ publisher --repo "uri/or/path/to/repo" index --config path/to/config.py
+```
+
 
 
