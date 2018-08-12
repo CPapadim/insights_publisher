@@ -6,8 +6,12 @@ import random, string
 import subprocess
 import logging
 import githelpers as gh
+import threading
+import webbrowser
 
 import nbformat as nbf
+
+import knowledge_repo
 
 def is_tool(name):
     try:
@@ -18,7 +22,7 @@ def is_tool(name):
             return False
     return True
 
-def validate_repo(repo_root):
+def validate_ghrepo(repo_root):
     
     if not is_tool("git"):
         logging.error("git not detected.  Please install git and add it to the PATH to proceed.")
@@ -52,7 +56,7 @@ def validate_repo(repo_root):
         logging.warning("Published report will reflect the state of remote 'origin/master'.")
 
 
-def add_repo_info(temp_notebook, nb_path_in_repo, repo_url_base, repo_name, commit_id):
+def add_ghrepo_info(temp_notebook, nb_path_in_repo, repo_url_base, repo_name, commit_id):
     
     commit_url = repo_url_base + "/tree/" + commit_id
 
@@ -75,6 +79,8 @@ def add_repo_info(temp_notebook, nb_path_in_repo, repo_url_base, repo_name, comm
     }\
     .repo_info {\
         margin-right:10px;\
+        margin-bottom:5px;\
+        margin-top:5px;\
     }\
     .code-output:last-of-type {\
         text-align:center;\
@@ -106,16 +112,37 @@ def main():
     parser = argparse.ArgumentParser(description='Publish a Jupyter notebook to Knowledge Repo and link to its git remote and commit ID.')
 
     # --- Required input arguments --- #
-    requiredArgs = parser.add_argument_group('required arguments')
-    requiredArgs.add_argument('--notebook_path', type=str, required=True, metavar="NOTEBOOK_PATH",
+    generalArgs = parser.add_argument_group('general arguments')
+    generalArgs.add_argument('--notebook_path', type=str, metavar="NOTEBOOK_PATH",
                               help="The path to the Jupyter notebook to publish.")
 
-    requiredArgs.add_argument('--report_path', type=str, required=True, metavar="REPORT_PATH",
+    generalArgs.add_argument('--report_path', type=str, metavar="REPORT_PATH",
                               help="The path to which to publish the report.")
 
-    requiredArgs.add_argument('--repo', type=str, required=True, metavar="REPO",
-                              help="The repo or database to pass to the `$ knowledge_repo` call.")
+    generalArgs.add_argument('--repo', type=str, metavar="REPO",
+                              help="The knowledge repository uri.")
+
+
+    subparsers = parser.add_subparsers(help='sub-commands')
+
+    preview = subparsers.add_parser('preview', help='Preview post.')
+    preview.set_defaults(action='preview')
+    preview.add_argument('--host', help="The host running the Knowledge Repo server", required=True)
+    preview.add_argument('--port', default=None, type=int, help="Specify the port on which the server is running.  Typically 80 for http:// and 443 for https://")   
+    preview.add_argument('--protocol', default='https', help="Specify the protocol (http or https)")
+
+    add = subparsers.add_parser('add', help='Submit post for review')
+    add.set_defaults(action='add')
+    add.add_argument('--update', action='store_true', help='If post already exists, update it')
     
+    publish = subparsers.add_parser('publish', help='Publish post')
+    publish.set_defaults(action='publish')
+
+    index = subparsers.add_parser('index', help='Refresh the index to make new posts discoverable')
+    index.set_defaults(action='index')
+    index.add_argument('--dburi', help="SQLAlchemy dburi")
+    index.add_argument('--config', help="Knowledge Repo config file, which MUST have indexing enabled", required=True)
+
     # if no argument is passed, show help :
     if len(sys.argv) == 1:
         parser.print_help()
@@ -123,51 +150,120 @@ def main():
 
     args = parser.parse_args()
 
+    if (args.repo is None) and (args.action != 'index'):
+        parser.print_help()
+        raise ValueError("No repository specified. Please set the --repo flag")
 
-    if not os.path.isfile(args.notebook_path):
-        raise ValueError("Notebook path does not exist.")
-        sys.exit(1) 
+    if (args.report_path is None) and (args.action != 'index'):
+        parser.print_help()
+        raise ValueError("No repository specified. Please set the --report_path flag")   
 
-    # Get the notebook file and directory names, and other paths
-    file_dir = os.path.dirname(os.path.normpath(args.notebook_path))
-    file_name = os.path.basename(os.path.normpath(args.notebook_path))
-    nb_path_in_repo = gh.get_path_in_repo(file_dir) + "/" + file_name
-
-    repo_root = gh.get_repo_root(file_dir)
-    repo_name = repo_root.split("/")[-1]
-    script_dir = os.path.dirname(sys.argv[0])
-    rand_dir = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(20))
-    temp_dir = script_dir + "/temp_dir/" + rand_dir
-    temp_notebook = temp_dir + "/" + repo_name + nb_path_in_repo
+    if (args.notebook_path is None) and (args.action == 'add'):
+        parser.print_help()
+        raise ValueError("No repository specified. Please set the --notebook_path flag")
 
 
-    # Create temporary directory
-    if not os.path.exists(temp_dir):
-        try:
-            os.makedirs(temp_dir)
-        except OSError as exc: # Guard against race condition
-            if exc.errno != os.errno.EEXIST:
-                raise
+
+    repo = knowledge_repo.KnowledgeRepository.for_uri(args.repo)
+
+    if args.action == 'index':  # Needs to happen before any other actions code to keep things simple
+        app = repo.get_app(db_uri=None, debug=False, config=args.config)
+        app.db_update_index(check_timeouts=False, force=True, reindex=False)
+
+        sys.exit(0)
 
 
-    # Make sure the repo is ready for publication    
-    validate_repo(repo_root)
+    if (args.action != 'publish') and (args.action != 'preview'):
+        # Get the notebook file and directory names, and other paths
+        file_dir = os.path.dirname(os.path.normpath(args.notebook_path))
+        file_name = os.path.basename(os.path.normpath(args.notebook_path))
+        nb_path_in_repo = gh.get_path_in_repo(file_dir) + "/" + file_name
 
-    # clone the repo
-    repo_url = gh.get_repo_url(repo_root)
-    gh.git_clone(repo_url, temp_dir)
+        repo_root = gh.get_repo_root(file_dir)
+        repo_name = repo_root.split("/")[-1]
+        script_dir = os.path.dirname(sys.argv[0])
+        rand_dir = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(20))
+        temp_dir = script_dir + "/temp_dir/" + rand_dir
+        temp_notebook = temp_dir + "/" + repo_name + nb_path_in_repo
 
-    # Add git repo info (link to repo, commit id, and notebook link in commit)
-    repo_url_base = '.'.join(repo_url.split(".")[:-1])
-    commit_id = gh.get_commit_id(repo_root, "origin/master")
-    add_repo_info(temp_notebook, nb_path_in_repo, repo_url_base, repo_name, commit_id)
-    
-    # Publish the notebook
-    kr_command = "knowledge_repo --repo " + args.repo + " add " + temp_notebook + " -p " + args.report_path + " --update"
-    subprocess.call(kr_command.split())
-    
-    # Cleanup
-    shutil.rmtree(temp_dir, ignore_errors=True)
+        if (args.action == 'add'):
+
+            # Create temporary directory
+            if not os.path.exists(temp_dir):
+                try:
+                    os.makedirs(temp_dir)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != os.errno.EEXIST:
+                        raise
+
+
+            # Make sure the repo is ready for publication    
+            validate_ghrepo(repo_root)
+
+            # clone the repo
+            repo_url = gh.get_repo_url(repo_root)
+            gh.git_clone(repo_url, temp_dir)
+
+            # Add git repo info (link to repo, commit id, and notebook link in commit)
+            repo_url_base = '.'.join(repo_url.split(".")[:-1])
+            commit_id = gh.get_commit_id(temp_dir + '/' + repo_name, "master")
+            add_ghrepo_info(temp_notebook, nb_path_in_repo, repo_url_base, repo_name, commit_id)
+        
+        kp = knowledge_repo.KnowledgePost.from_file(temp_notebook)
+
+    # Publishing workflow -- START
+    #
+    # First, [add] the notebook
+    #
+    # If it already exists, use [--update] flag to update it
+    #
+    # Next, preview notebook (optional) - just opens path to notebook in browser
+    #
+    # Finally, publish the notebook.  This takes the notebook through the
+    # submit, accept, publish stages all at once - reviews can instead be done by
+    # just sending out the preview link to whoever you want to review it OR by
+    # sending out the direct link to the notebook once it's been [add]ed
+    #
+    # If a post doesn't exist when attempting to publish, it will throw an error
+
+    # Add notebook
+    if args.action == 'add':
+        repo.add(kp, path=args.report_path, update=args.update)
+
+        # Cleanup
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        sys.exit(0)
+       
+    # Preview notebook
+    elif args.action == 'preview':
+        kp_path = repo._kp_path(args.report_path)
+
+        if args.protocol is not None:
+            url = args.protocol + '://' + args.host
+        else:
+            url = args.host
+
+        if args.port is not None:
+            url = url + ':' + args.port
+
+        url = url + '/post/' + kp_path
+        
+        threading.Timer(1.25, lambda: webbrowser.open(url)).start()
+
+        sys.exit(0)
+
+    # Publish notebook
+    elif args.action == 'publish':
+        if args.report_path not in repo:
+            raise('Post not found in repo.  Please [add] it before publishing')
+        repo.submit(path=args.report_path)
+        repo.accept(args.report_path) # If post hasn't been accepted, accept it anyway (skip review)
+        repo.publish(args.report_path)
+        # Update the index??
+
+        sys.exit(0)
+
 
 if __name__ == '__main__':
     main()
