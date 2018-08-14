@@ -8,6 +8,7 @@ import logging
 from insights_publisher import githelpers as gh
 import threading
 import webbrowser
+import tempfile
 
 import nbformat as nbf
 
