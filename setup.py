@@ -10,5 +10,6 @@ setup(
     license='MIT',
     packages=['insights_publisher'],
     zip_safe=False,
-    scripts=['insights_publisher/publisher']
+    scripts=['publisher'],
+    package_dir = {'': '../insights_publisher'}
 )
