@@ -5,7 +5,7 @@ import sys, os, shutil
 import random, string
 import subprocess
 import logging
-import githelpers as gh
+import insights_publisher import githelpers as gh
 import threading
 import webbrowser
 
