@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='insights_publisher',
@@ -8,7 +8,7 @@ setup(
     author='Charalampos Papadimitriou',
     author_email='papadimitriou.c@gmail.com',
     license='MIT',
-    packages=['insights_publisher'],
+    packages=find_packages(),
     zip_safe=False,
     scripts=['insights_publisher/publisher'],
 )
