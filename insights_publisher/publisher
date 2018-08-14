@@ -183,7 +183,8 @@ def main():
         repo_name = repo_root.split("/")[-1]
         script_dir = os.path.dirname(sys.argv[0])
         rand_dir = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(20))
-        temp_dir = script_dir + "/temp_dir/" + rand_dir
+        os_tmpdir = tempfile.gettempdir()
+        temp_dir = os_tmpdir + "/" + rand_dir
         temp_notebook = temp_dir + "/" + repo_name + nb_path_in_repo
 
         if (args.action == 'add'):
